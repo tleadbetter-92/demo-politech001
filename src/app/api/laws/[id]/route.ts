@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import clientPromise from '@/lib/mongodb'
 import { ObjectId } from 'mongodb'
 
@@ -29,7 +29,7 @@ interface Vote {
 }
 
 export async function GET(
-  request: Request,
+  request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
@@ -46,8 +46,7 @@ export async function GET(
     }
 
     // Get the user's vote if userId is provided in the query
-    const url = new URL(request.url)
-    const userId = url.searchParams.get('userId')
+    const userId = request.nextUrl.searchParams.get('userId')
     let userVote = null
 
     if (userId) {
@@ -71,7 +70,7 @@ export async function GET(
 }
 
 export async function POST(
-  request: Request,
+  request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
@@ -161,3 +160,4 @@ export async function POST(
     )
   }
 }
+
