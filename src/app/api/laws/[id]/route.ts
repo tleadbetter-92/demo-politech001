@@ -1,34 +1,72 @@
 import { NextResponse } from 'next/server'
-import fs from 'fs'
-import path from 'path'
+import clientPromise from '@/lib/mongodb'
+import { ObjectId } from 'mongodb'
 
-const dataFile = path.join(process.cwd(), 'data', 'laws.json')
+interface Law {
+  id: string
+  title: string
+  description: string
+  mpComment: string
+  link: string
+  votes: {
+    yes: number
+    no: number
+  }
+  comments: Array<{
+    id: string
+    author: string
+    content: string
+    timestamp: string
+  }>
+}
+
+interface Vote {
+  _id: ObjectId
+  userId: string
+  lawId: string
+  vote: 'yes' | 'no'
+  createdAt: Date
+}
 
 export async function GET(
   request: Request,
   { params }: { params: { id: string } }
 ) {
-  const id = params.id
-
   try {
-    let laws = []
-    if (fs.existsSync(dataFile)) {
-      const fileContents = fs.readFileSync(dataFile, 'utf8')
-      laws = JSON.parse(fileContents)
-    } else {
-      console.error('laws.json does not exist at:', dataFile)
-      return NextResponse.json({ error: 'Data file not found' }, { status: 500 })
-    }
-
-    const law = laws.find((law: any) => law.id === id)
+    const client = await clientPromise
+    const db = client.db("politech_demo")
+    
+    const law = await db.collection<Law>("laws").findOne({ id: params.id })
+    
     if (!law) {
-      return NextResponse.json({ error: 'Law not found' }, { status: 404 })
+      return NextResponse.json(
+        { error: 'Law not found' },
+        { status: 404 }
+      )
     }
 
-    return NextResponse.json(law)
+    // Get the user's vote if userId is provided in the query
+    const url = new URL(request.url)
+    const userId = url.searchParams.get('userId')
+    let userVote = null
+
+    if (userId) {
+      const vote = await db.collection<Vote>("votes").findOne({
+        userId: userId,
+        lawId: params.id
+      })
+      if (vote) {
+        userVote = vote.vote
+      }
+    }
+
+    return NextResponse.json({ ...law, userVote })
   } catch (error) {
     console.error('Error reading law data:', error)
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 })
+    return NextResponse.json(
+      { error: 'Internal Server Error' },
+      { status: 500 }
+    )
   }
 }
 
@@ -36,40 +74,90 @@ export async function POST(
   request: Request,
   { params }: { params: { id: string } }
 ) {
-  const id = params.id
-
   try {
-    const body = await request.json()
-    let laws = []
+    const body = await request.json() as { type: string; vote?: 'yes' | 'no'; author?: string; content?: string; userId: string }
+    const client = await clientPromise
+    const db = client.db("politech_demo")
     
-    if (fs.existsSync(dataFile)) {
-      const fileContents = fs.readFileSync(dataFile, 'utf8')
-      laws = JSON.parse(fileContents)
-    } else {
-      return NextResponse.json({ error: 'Data file not found' }, { status: 500 })
+    const law = await db.collection<Law>("laws").findOne({ id: params.id })
+    if (!law) {
+      return NextResponse.json(
+        { error: 'Law not found' },
+        { status: 404 }
+      )
     }
 
-    const lawIndex = laws.findIndex((law: any) => law.id === id)
-    if (lawIndex === -1) {
-      return NextResponse.json({ error: 'Law not found' }, { status: 404 })
-    }
+    if (body.type === 'vote' && body.vote && body.userId) {
+      // Check if the user has already voted
+      const existingVote = await db.collection<Vote>("votes").findOne({
+        userId: body.userId,
+        lawId: params.id
+      })
 
-    if (body.type === 'vote') {
-      laws[lawIndex].votes[body.vote]++
-    } else if (body.type === 'comment') {
+      if (existingVote) {
+        return NextResponse.json(
+          { error: 'You have already voted on this law' },
+          { status: 400 }
+        )
+      }
+
+      // Create a new vote
+      const newVote: Omit<Vote, '_id'> = {
+        userId: body.userId,
+        lawId: params.id,
+        vote: body.vote,
+        createdAt: new Date()
+      }
+
+      await db.collection<Vote>("votes").insertOne(newVote as Vote)
+
+      // Update the law's vote count
+      const result = await db.collection<Law>("laws").findOneAndUpdate(
+        { id: params.id },
+        { $inc: { [`votes.${body.vote}`]: 1 } },
+        { returnDocument: 'after' }
+      )
+
+      if (!result.value) {
+        return NextResponse.json(
+          { error: 'Failed to update vote' },
+          { status: 500 }
+        )
+      }
+
+      return NextResponse.json(result.value)
+    } 
+    
+    if (body.type === 'comment' && body.author && body.content) {
       const newComment = {
-        id: Date.now(),
+        id: new ObjectId().toString(),
         author: body.author,
         content: body.content,
         timestamp: new Date().toISOString()
       }
-      laws[lawIndex].comments.unshift(newComment)
+      const result = await db.collection<Law>("laws").findOneAndUpdate(
+        { id: params.id },
+        { $push: { comments: { $each: [newComment], $position: 0 } } },
+        { returnDocument: 'after' }
+      )
+      if (!result.value) {
+        return NextResponse.json(
+          { error: 'Failed to add comment' },
+          { status: 500 }
+        )
+      }
+      return NextResponse.json(result.value)
     }
 
-    fs.writeFileSync(dataFile, JSON.stringify(laws, null, 2))
-    return NextResponse.json(laws[lawIndex])
+    return NextResponse.json(
+      { error: 'Invalid request type' },
+      { status: 400 }
+    )
   } catch (error) {
     console.error('Error updating law data:', error)
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 })
+    return NextResponse.json(
+      { error: 'Internal Server Error' },
+      { status: 500 }
+    )
   }
 }
