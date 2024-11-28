@@ -45,7 +45,6 @@ export async function GET(
       )
     }
 
-    // Get the user's vote if userId is provided in the query
     const userId = request.nextUrl.searchParams.get('userId')
     let userVote = null
 
@@ -87,7 +86,6 @@ export async function POST(
     }
 
     if (body.type === 'vote' && body.vote && body.userId) {
-      // Check if the user has already voted
       const existingVote = await db.collection<Vote>("votes").findOne({
         userId: body.userId,
         lawId: params.id
@@ -100,7 +98,6 @@ export async function POST(
         )
       }
 
-      // Create a new vote
       const newVote: Omit<Vote, '_id'> = {
         userId: body.userId,
         lawId: params.id,
@@ -110,7 +107,6 @@ export async function POST(
 
       await db.collection<Vote>("votes").insertOne(newVote as Vote)
 
-      // Update the law's vote count
       const result = await db.collection<Law>("laws").findOneAndUpdate(
         { id: params.id },
         { $inc: { [`votes.${body.vote}`]: 1 } },
