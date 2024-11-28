@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import clientPromise from '@/lib/mongodb'
 import { ObjectId } from 'mongodb'
 
+// Define interfaces at the top (keep these unchanged)
 interface Law {
   id: string
   title: string
@@ -28,15 +29,17 @@ interface Vote {
   createdAt: Date
 }
 
+// Simplified function signatures for Next.js 15
 export async function GET(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
+  const { id } = params;
   try {
     const client = await clientPromise
     const db = client.db("politech_demo")
     
-    const law = await db.collection<Law>("laws").findOne({ id: params.id })
+    const law = await db.collection<Law>("laws").findOne({ id })
     
     if (!law) {
       return NextResponse.json(
@@ -50,8 +53,8 @@ export async function GET(
 
     if (userId) {
       const vote = await db.collection<Vote>("votes").findOne({
-        userId: userId,
-        lawId: params.id
+        userId,
+        lawId: id
       })
       if (vote) {
         userVote = vote.vote
@@ -72,12 +75,13 @@ export async function POST(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
+  const { id } = params;
   try {
     const body = await request.json() as { type: string; vote?: 'yes' | 'no'; author?: string; content?: string; userId: string }
     const client = await clientPromise
     const db = client.db("politech_demo")
     
-    const law = await db.collection<Law>("laws").findOne({ id: params.id })
+    const law = await db.collection<Law>("laws").findOne({ id })
     if (!law) {
       return NextResponse.json(
         { error: 'Law not found' },
@@ -88,7 +92,7 @@ export async function POST(
     if (body.type === 'vote' && body.vote && body.userId) {
       const existingVote = await db.collection<Vote>("votes").findOne({
         userId: body.userId,
-        lawId: params.id
+        lawId: id
       })
 
       if (existingVote) {
@@ -100,7 +104,7 @@ export async function POST(
 
       const newVote: Omit<Vote, '_id'> = {
         userId: body.userId,
-        lawId: params.id,
+        lawId: id,
         vote: body.vote,
         createdAt: new Date()
       }
@@ -108,7 +112,7 @@ export async function POST(
       await db.collection<Vote>("votes").insertOne(newVote as Vote)
 
       const result = await db.collection<Law>("laws").findOneAndUpdate(
-        { id: params.id },
+        { id },
         { $inc: { [`votes.${body.vote}`]: 1 } },
         { returnDocument: 'after' }
       )
@@ -131,7 +135,7 @@ export async function POST(
         timestamp: new Date().toISOString()
       }
       const result = await db.collection<Law>("laws").findOneAndUpdate(
-        { id: params.id },
+        { id },
         { $push: { comments: { $each: [newComment], $position: 0 } } },
         { returnDocument: 'after' }
       )
